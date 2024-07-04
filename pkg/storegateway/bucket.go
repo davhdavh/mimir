@@ -260,25 +260,17 @@ func NewBucketStore(
 	return s, nil
 }
 
-func (s *BucketStore) subservices() []services.Service {
-	return []services.Service{s.snapshotter, s.indexReaderPool}
-}
-
 func (s *BucketStore) start(context.Context) error {
 	// Use context.Background() so that we stop the index reader pool ourselves and do it after closing all blocks.
 	return services.StartAndAwaitRunning(context.Background(), s.indexReaderPool)
 }
 
 func (s *BucketStore) stop(err error) error {
-	subservices := s.subservices()
-
 	errs := multierror.New(err)
-	for _, svc := range subservices {
-		if err := services.StopAndAwaitTerminated(context.Background(), svc); err != nil {
-			errs.Add(fmt.Errorf("stop %T: %w", svc, err))
-		}
-	}
-
+	errs.Add(s.closeAllBlocks())
+	// The snapshotter depends on the reader pool, so we close the snapshotter first.
+	errs.Add(services.StopAndAwaitTerminated(context.Background(), s.snapshotter))
+	errs.Add(services.StopAndAwaitTerminated(context.Background(), s.indexReaderPool))
 	return errs.Err()
 }
 
@@ -532,6 +524,17 @@ func (s *BucketStore) removeBlock(id ulid.ULID) (returnErr error) {
 		return errors.Wrap(err, "delete block")
 	}
 	return nil
+}
+
+func (s *BucketStore) closeAllBlocks() error {
+	errs := multierror.New()
+	s.blockSet.forEach(func(b *bucketBlock) {
+		if err := b.Close(); err != nil {
+			errs.Add(fmt.Errorf("close block: %w", err))
+		}
+	})
+
+	return errs.Err()
 }
 
 func (s *BucketStore) removeAllBlocks() error {
