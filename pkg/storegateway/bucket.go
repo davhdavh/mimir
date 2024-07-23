@@ -527,14 +527,7 @@ func (s *BucketStore) removeBlock(id ulid.ULID) (returnErr error) {
 }
 
 func (s *BucketStore) closeAllBlocks() error {
-	errs := multierror.New()
-	s.blockSet.forEach(func(b *bucketBlock) {
-		if err := b.Close(); err != nil {
-			errs.Add(fmt.Errorf("close block: %w", err))
-		}
-	})
-
-	return errs.Err()
+	return s.blockSet.CloseAll()
 }
 
 func (s *BucketStore) removeAllBlocks() error {
@@ -1904,6 +1897,17 @@ func (s *bucketBlockSet) forEach(fn func(b *bucketBlock)) {
 		}
 		return true
 	})
+}
+
+// CloseAll closes all blocks in the set and returns all encountered errors after trying all blocks.
+// Blocks aren't removed from the set after closing.
+func (s *bucketBlockSet) CloseAll() error {
+	errs := multierror.New()
+	s.blockSet.Range(func(_, val any) bool {
+		errs.Add(val.(*bucketBlock).Close())
+		return true
+	})
+	return errs.Err()
 }
 
 func (s *bucketBlockSet) blockULIDs() []ulid.ULID {
